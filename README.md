@@ -22,7 +22,7 @@ Make sure you have the following installed:
 - `gcc` or any C compiler
 - `make` (optional but recommended)
 - `curl`
-- Ollama API running locally (`localhost:11434`)
+- Ollama API running locally (`localhost:11434`) with llama3 model
 
 ### Build
 
