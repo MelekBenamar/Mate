@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include "../common/protocol.h"
+#include "../common/utils.h"
 
 #define SOCKET_PATH "/tmp/mate.sock"
 
@@ -48,6 +49,7 @@ int main(int argc, char *argv[]) {
     ssize_t n = recv(client_side_fd, &res, sizeof(res), 0);
     if (n > 0) {
         res.response[res.response_len] = '\0';
+        decode_json_escapes(res.response);
         printf("Response (%d): %s\n", res.status, res.response);
     } else {
         printf("No response received\n");
