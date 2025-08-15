@@ -1,0 +1,469 @@
+# Mate Local Assistant - Step-by-Step Implementation
+
+## Phase 1: Environment Setup (Day 1)
+
+### Step 1: Install Ollama
+```bash
+# Download and install Ollama
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Start Ollama service
+sudo systemctl start ollama
+sudo systemctl enable ollama
+
+# Test installation
+ollama --version
+```
+
+### Step 2: Download the llama3 model
+```bash
+# Download llama3 model (larger but better quality than 1b)
+ollama pull llama3
+
+# Test the model
+ollama run llama3
+# Type a question, then /bye to exit
+```
+
+### Step 3: Create project structure
+```bash
+mkdir ~/mate-assistant
+cd ~/mate-assistant
+
+mkdir -p src/{daemon,client,common}
+mkdir -p config
+mkdir -p logs
+mkdir -p build
+
+# Create basic files
+touch src/daemon/mate_daemon.c
+touch src/client/mate_client.c
+touch src/common/protocol.h
+touch src/common/utils.c
+touch config/mate.service
+touch Makefile
+touch README.md
+```
+
+## Phase 2: Core Communication (Days 2-3)
+
+### Step 4: Define communication protocol
+Create `src/common/protocol.h`:
+```c
+#ifndef PROTOCOL_H
+#define PROTOCOL_H
+
+#include <stddef.h>
+
+#define SOCKET_PATH "/tmp/mate.sock"
+#define MAX_MESSAGE_SIZE 4096
+#define MAX_RESPONSE_SIZE 8192
+
+typedef struct {
+    char message[MAX_MESSAGE_SIZE];
+    size_t message_len;  // Changed from int to size_t
+} ai_request_t;
+
+typedef struct {
+    char response[MAX_RESPONSE_SIZE];
+    size_t response_len;  // Changed from int to size_t
+    int status; // 0 = success, -1 = error
+} ai_response_t;
+
+// Function prototypes
+int create_socket_server(void);
+int connect_to_daemon(void);
+int send_request(int sockfd, const char* message);
+int receive_response(int sockfd, char* buffer, size_t buffer_size);
+
+#endif
+```
+
+### Step 5: Build the daemon foundation
+Create basic daemon structure in `src/daemon/mate_daemon.c`:
+```c
+#define _GNU_SOURCE  // Enable GNU extensions
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <signal.h>
+#include <syslog.h>
+#include <errno.h>
+
+#include "../common/protocol.h"
+
+static int server_fd = -1;
+static int running = 1;
+
+void signal_handler(int sig) {
+    syslog(LOG_INFO, "Received signal %d, shutting down", sig);
+    running = 0;
+}
+
+int create_socket_server(void) {
+    struct sockaddr_un addr;
+    
+    server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (server_fd == -1) {
+        syslog(LOG_ERR, "socket() failed: %s", strerror(errno));
+        return -1;
+    }
+    
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);
+    
+    unlink(SOCKET_PATH); // Remove existing socket
+    
+    if (bind(server_fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+        syslog(LOG_ERR, "bind() failed: %s", strerror(errno));
+        return -1;
+    }
+    
+    if (listen(server_fd, 5) == -1) {
+        syslog(LOG_ERR, "listen() failed: %s", strerror(errno));
+        return -1;
+    }
+    
+    return 0;
+}
+
+// Call Ollama API using curl
+int query_ollama(const char* prompt, char* response, size_t response_size) {
+    FILE* fp;
+    char command[MAX_MESSAGE_SIZE + 512]; // Increased buffer size
+    
+    // Simple escape for quotes - replace " with \"
+    char escaped_prompt[MAX_MESSAGE_SIZE];
+    const char* src = prompt;
+    char* dst = escaped_prompt;
+    
+    // Ensure we don't overflow the escaped buffer
+    while (*src && (dst - escaped_prompt) < (MAX_MESSAGE_SIZE - 3)) {
+        if (*src == '"') {
+            *dst++ = '\\';
+            *dst++ = '"';
+        } else if (*src == '\\') {
+            *dst++ = '\\';
+            *dst++ = '\\';
+        } else {
+            *dst++ = *src;
+        }
+        src++;
+    }
+    *dst = '\0';
+    
+    // Use a safer approach with limited prompt size
+    if (strlen(escaped_prompt) > 2000) {
+        strcpy(response, "{\"response\": \"Error: Prompt too long\"}");
+        return -1;
+    }
+    
+    snprintf(command, sizeof(command),
+        "curl -s -X POST http://localhost:11434/api/generate "
+        "-H 'Content-Type: application/json' "
+        "-d '{\"model\": \"llama3\", \"prompt\": \"%.2000s\", \"stream\": false}' "
+        "2>/dev/null", escaped_prompt);
+    
+    fp = popen(command, "r");
+    if (fp == NULL) {
+        return -1;
+    }
+    
+    // Read response (this will be JSON, we'll parse it later)
+    size_t bytes_read = fread(response, 1, response_size - 1, fp);
+    response[bytes_read] = '\0';
+    pclose(fp);
+    
+    return 0;
+}
+
+void handle_client(int client_fd) {
+    ai_request_t request;
+    ai_response_t response;
+    
+    // Read request
+    if (recv(client_fd, &request, sizeof(request), 0) <= 0) {
+        return;
+    }
+    
+    // Process with Ollama
+    char raw_response[MAX_RESPONSE_SIZE];
+    if (query_ollama(request.message, raw_response, sizeof(raw_response)) == 0) {
+        // TODO: Parse JSON response to extract actual text
+        strncpy(response.response, raw_response, MAX_RESPONSE_SIZE - 1);
+        response.status = 0;
+    } else {
+        strcpy(response.response, "Error: Could not get response from AI");
+        response.status = -1;
+    }
+    
+    response.response_len = strlen(response.response);
+    
+    // Send response
+    send(client_fd, &response, sizeof(response), 0);
+}
+
+int main() {
+    // Daemonize
+    if (daemon(0, 0) == -1) {
+        perror("daemon");
+        exit(1);
+    }
+    
+    openlog("mate-daemon", LOG_PID, LOG_DAEMON);
+    syslog(LOG_INFO, "Mate daemon starting");
+    
+    signal(SIGTERM, signal_handler);
+    signal(SIGINT, signal_handler);
+    
+    if (create_socket_server() == -1) {
+        exit(1);
+    }
+    
+    while (running) {
+        int client_fd = accept(server_fd, NULL, NULL);
+        if (client_fd == -1) {
+            if (errno == EINTR) continue; // Interrupted by signal
+            syslog(LOG_ERR, "accept() failed: %s", strerror(errno));
+            continue;
+        }
+        
+        handle_client(client_fd);
+        close(client_fd);
+    }
+    
+    close(server_fd);
+    unlink(SOCKET_PATH);
+    syslog(LOG_INFO, "Mate daemon stopped");
+    closelog();
+    
+    return 0;
+}
+```
+
+### Step 6: Build the CLI client
+Create `src/client/mate_client.c`:
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+
+#include "../common/protocol.h"
+
+int connect_to_daemon(void) {
+    int sockfd;
+    struct sockaddr_un addr;
+    
+    sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (sockfd == -1) {
+        perror("socket");
+        return -1;
+    }
+    
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);
+    
+    if (connect(sockfd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+        perror("connect");
+        close(sockfd);
+        return -1;
+    }
+    
+    return sockfd;
+}
+
+int send_request(int sockfd, const char* message) {
+    ai_request_t request;
+    
+    if (strlen(message) >= MAX_MESSAGE_SIZE) {
+        fprintf(stderr, "Error: Message too long (max %d characters)\n", MAX_MESSAGE_SIZE - 1);
+        return -1;
+    }
+    
+    strncpy(request.message, message, MAX_MESSAGE_SIZE - 1);
+    request.message[MAX_MESSAGE_SIZE - 1] = '\0';
+    request.message_len = strlen(request.message);
+    
+    if (send(sockfd, &request, sizeof(request), 0) == -1) {
+        perror("send");
+        return -1;
+    }
+    
+    return 0;
+}
+
+int receive_response(int sockfd, char* buffer, size_t buffer_size) {
+    ai_response_t response;
+    
+    if (recv(sockfd, &response, sizeof(response), 0) <= 0) {
+        perror("recv");
+        return -1;
+    }
+    
+    if (response.status != 0) {
+        fprintf(stderr, "Server error: %s\n", response.response);
+        return -1;
+    }
+    
+    // Copy response to buffer, ensuring null termination
+    size_t copy_len = (response.response_len < buffer_size - 1) ? 
+                      response.response_len : buffer_size - 1;
+    
+    strncpy(buffer, response.response, copy_len);
+    buffer[copy_len] = '\0';
+    
+    return 0;
+}
+
+int main(int argc, char* argv[]) {
+    if (argc < 2) {
+        printf("Usage: %s \"your question here\"\n", argv[0]);
+        printf("   or: %s (for interactive mode)\n", argv[0]);
+        return 1;
+    }
+    
+    int sockfd = connect_to_daemon();
+    if (sockfd == -1) {
+        fprintf(stderr, "Error: Could not connect to Mate daemon\n");
+        fprintf(stderr, "Make sure the daemon is running: sudo systemctl start mate\n");
+        return 1;
+    }
+    
+    // Build the question from all arguments
+    char question[MAX_MESSAGE_SIZE] = {0};
+    for (int i = 1; i < argc; i++) {
+        strncat(question, argv[i], MAX_MESSAGE_SIZE - strlen(question) - 1);
+        if (i < argc - 1) {
+            strncat(question, " ", MAX_MESSAGE_SIZE - strlen(question) - 1);
+        }
+    }
+    
+    // Send request using the helper function
+    if (send_request(sockfd, question) == -1) {
+        close(sockfd);
+        return 1;
+    }
+    
+    // Receive response using the helper function
+    char response_buffer[MAX_RESPONSE_SIZE];
+    if (receive_response(sockfd, response_buffer, sizeof(response_buffer)) == -1) {
+        close(sockfd);
+        return 1;
+    }
+    
+    printf("%s\n", response_buffer);
+    
+    close(sockfd);
+    return 0;
+}
+```
+
+## Phase 3: Build System (Day 4)
+
+### Step 7: Create Makefile
+```makefile
+CC = gcc
+CFLAGS = -Wall -Wextra -std=c99 -D_GNU_SOURCE
+BUILDDIR = build
+SRCDIR = src
+
+DAEMON_SOURCES = $(SRCDIR)/daemon/mate_daemon.c
+CLIENT_SOURCES = $(SRCDIR)/client/mate_client.c
+
+all: $(BUILDDIR)/mate-daemon $(BUILDDIR)/mate
+
+$(BUILDDIR)/mate-daemon: $(DAEMON_SOURCES)
+	mkdir -p $(BUILDDIR)
+	$(CC) $(CFLAGS) -o $@ $^
+
+$(BUILDDIR)/mate: $(CLIENT_SOURCES)
+	mkdir -p $(BUILDDIR)
+	$(CC) $(CFLAGS) -o $@ $^
+
+install: all
+	sudo cp $(BUILDDIR)/mate-daemon /usr/local/bin/
+	sudo cp $(BUILDDIR)/mate /usr/local/bin/
+	sudo cp config/mate.service /etc/systemd/system/
+	sudo systemctl daemon-reload
+
+clean:
+	rm -rf $(BUILDDIR)
+
+.PHONY: all install clean
+```
+
+### Step 8: Create systemd service
+Create `config/mate.service`:
+```ini
+[Unit]
+Description=Mate Local Assistant Daemon
+After=network.target ollama.service
+Requires=ollama.service
+
+[Service]
+Type=forking
+ExecStart=/usr/local/bin/mate-daemon
+User=mate
+Group=mate
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+## Phase 4: Testing & Deployment (Day 5)
+
+### Step 9: Build and test
+```bash
+# Build everything
+make
+
+# Test Ollama is working with llama3
+curl -X POST http://localhost:11434/api/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "llama3", "prompt": "Hello, world!", "stream": false}'
+
+# Install the service
+make install
+
+# Start the service
+sudo systemctl start mate
+sudo systemctl status mate
+
+# Test the client
+./build/mate "What is malloc in C?"
+```
+
+### Step 10: Usage examples
+```bash
+# Simple questions
+mate "Explain pointers in C"
+mate "How do I create a linked list?"
+mate "What is the difference between malloc and calloc?"
+
+# Check service status
+systemctl status mate
+
+# View logs
+journalctl -u mate -f
+```
+
+## Next Steps for Enhancement
+
+1. **JSON parsing** - Parse Ollama's JSON response properly
+2. **Error handling** - Better error messages and recovery
+3. **Interactive mode** - Shell-like interface
+4. **Configuration** - Config file for model selection
+5. **Security** - Proper privilege dropping and input validation
+6. **Performance** - Connection pooling, response caching
+
+This gives you a solid foundation for a privacy-focused AI assistant service in C!
