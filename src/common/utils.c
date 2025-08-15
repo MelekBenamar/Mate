@@ -8,10 +8,10 @@
 
 int query_ollama(const char* prompt, char* response, size_t response_size) {
     FILE* fp;
-    char command[MAX_MESSAGE_SIZE + 256];
+    char command[MAX_MESSAGE_SIZE + 4096];
 
     // Escape quotes in prompt
-    char escaped_prompt[MAX_MESSAGE_SIZE * 2];
+    char escaped_prompt[MAX_MESSAGE_SIZE];
     size_t j = 0;
     for (size_t i = 0; i < strlen(prompt) && j < sizeof(escaped_prompt) - 2; i++) {
         if (prompt[i] == '"') {
