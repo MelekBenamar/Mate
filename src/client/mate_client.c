@@ -50,7 +50,7 @@ int main(int argc, char *argv[]) {
     if (n > 0) {
         res.response[res.response_len] = '\0';
         decode_json_escapes(res.response);
-        printf("Response (%d): %s\n", res.status, res.response);
+        printf("Response : %s\n", res.response);
     } else {
         printf("No response received\n");
     }
