@@ -22,7 +22,7 @@ Make sure you have the following installed:
 - `gcc` or any C compiler
 - `make` (optional but recommended)
 - `curl`
-- Ollama API running locally (`localhost:11434`) with llama3 model
+- Ollama API running locally (`localhost:11434`) with llama3 model (Importent !!)
 
 ### Build
 
@@ -33,35 +33,33 @@ Clone the repository and navigate to the project folder:
     cd mate-assistant
 ```
 
-Build the daemon and client:
+Activate Mate:
 
 ```bash
-
-mkdir -p build
-
-# Build daemon
-gcc -Wall -Wextra -std=c99 -o build/mate-daemon src/daemon/mate_daemon.c src/common/utils.c
-
-# Build client
-gcc -Wall -Wextra -std=c99 -o build/mate-client src/client/mate_client.c
+make clean
+make install
 ```
 
 ## Usage
 
-### Running the Daemon
-
-Open a terminal and start the daemon:
+Open a terminal and ask mate, thats it:
 
 ```bash
-./build/mate-daemon
+mate "<your question here>"
 ```
 
-### Running the Client
+## Notes
 
-Open another terminal to send a message:
+Please it's important to start Ollama and run llama3 model:
 
 ```bash
-./build/mate-client "Hello Mate, how are you?"
+ollama serve
+ollama run llama3
 ```
 
-The client will connect to the daemon via the socket, send the message, and display the response returned by the AI.
+You can uninstall Mate any time by just doing:
+
+```bash
+make clean
+make uninstall
+```
