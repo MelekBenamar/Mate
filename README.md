@@ -1,6 +1,8 @@
 # Mate Assistant
 
-<img src="assets/Mate.png" alt="Mate Assistant Logo" width="200" />
+<div align="center">
+  <img src="assets/Mate.png" alt="Mate Assistant Logo" width="200" />
+</div>
 
 ## Overview
 
