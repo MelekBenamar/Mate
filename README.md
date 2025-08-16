@@ -33,8 +33,8 @@ Make sure you have the following installed:
 Clone the repository and navigate to the project folder:
 
 ```bash
-    git clone https://github.com/MelekBenamar/Mate.git
-    cd mate-assistant
+git clone https://github.com/MelekBenamar/Mate.git
+cd mate-assistant
 ```
 
 Activate Mate:
