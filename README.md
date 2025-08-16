@@ -1,6 +1,6 @@
 # Mate Assistant
 
-![Mate Assistant Logo](assets/Mate.png)
+<img src="assets/Mate.png" alt="Mate Assistant Logo" width="200" />
 
 ## Overview
 
