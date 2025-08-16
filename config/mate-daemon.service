@@ -1,0 +1,16 @@
+[Unit]
+Description=Mate AI Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/melek/mate-assistant/build/mate-daemon
+Restart=always
+RestartSec=2
+User=melek
+WorkingDirectory=/home/melek/mate-assistant
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
