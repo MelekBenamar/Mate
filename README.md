@@ -1,4 +1,4 @@
-# Mate Assistant (Terminal Mode)
+# Mate Assistant
 
 ![Mate Assistant Logo](assets/Mate.png)
 
@@ -65,3 +65,9 @@ You can uninstall Mate any time by just doing:
 make clean
 make uninstall
 ```
+
+## License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Usage Restrictions
+While this project is open-source, any commercial use, distribution, or derivative work should be made in compliance with the terms of the license.
