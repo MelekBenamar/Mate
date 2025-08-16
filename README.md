@@ -1,4 +1,4 @@
-# Mate Assistant (Terminal Mode)
+# Mate Assistant
 
 ## Overview
 
