@@ -1,5 +1,7 @@
 # Mate Assistant (Terminal Mode)
 
+![Mate Assistant Logo](assets/Mate.png)
+
 ## Overview
 
 Mate Assistant is a lightweight client-daemon application written in C, designed to communicate with the **Ollama AI API** through a local daemon. The project demonstrates a proof-of-concept workflow where:
